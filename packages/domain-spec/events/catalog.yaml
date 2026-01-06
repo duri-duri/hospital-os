@@ -1,0 +1,46 @@
+version: 0.1
+events:
+  # intake
+  - INTAKE_SUBMITTED
+  - VISIT_CREATED
+
+  # clinic
+  - DIAGNOSIS_CONFIRMED
+  - PLAN_PUBLISHED
+  - ORDER_CREATED
+
+  # rehab
+  - PROGRAM_ASSIGNED
+  - QUEST_ACCEPTED
+  - SESSION_COMPLETED
+
+  # procedure
+  - PROCEDURE_SCHEDULED
+  - PROCEDURE_COMPLETED
+  - AFTERCARE_DELIVERED
+
+  # admin
+  - INVOICE_ISSUED
+  - PAYMENT_CAPTURED
+  - REFUND_ISSUED
+
+  # reception
+  - RESERVATION_CREATED
+  - CHECKIN_DONE
+  - QUEUE_UPDATED
+
+  # patient
+  - INQUIRY_CREATED
+  - DOC_DELIVERED
+  - BOOKING_CHANGED
+
+  # infusion
+  - OFFER_SHOWN
+  - OFFER_ACCEPTED
+  - IV_ORDER_CREATED
+
+  # bodyquest extension
+  - QUEST_GENERATED
+
+  # iv_optimizer extension
+  - OFFER_RECOMMENDED
