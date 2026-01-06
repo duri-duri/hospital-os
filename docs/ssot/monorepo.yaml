@@ -1,0 +1,482 @@
+# docs/ssot/monorepo.yaml
+version: 0.3
+name: hospital-os-monorepo
+purpose: >
+  Hospital OS monorepo SSOT.
+  Defines repo tree, module registry, package boundaries,
+  single-source domain spec (schemas/events/state), dependency rules,
+  forbidden imports, and gate rules for consistency/expansion.
+
+# =============================================================================
+# 0) Module Policy (확장 규칙: 모듈 늘어도 안 흔들리게 하는 “헌법”)
+# =============================================================================
+module_policy:
+  module_kinds: ["record", "workflow", "program", "commerce"]
+  required_fields:
+    - id
+    - name
+    - kind
+    - owns
+    - entities
+    - events
+    - ui_surfaces
+  rules:
+    - rule_id: MODULES_MUST_BE_REGISTERED
+      severity: error
+      message: >
+        New modules must be registered in domain_modules first (SSOT-first).
+    - rule_id: DOMAIN_SPEC_FIRST
+      severity: error
+      message: >
+        Any new entity/state/event/schema must be defined in packages/domain-spec
+        before implementation in apps/packages.
+    - rule_id: NO_BUSINESS_LOGIC_IN_APPS
+      severity: error
+      message: >
+        Apps must not implement domain rules. Use packages/business-logic only
+        (derived from domain-spec).
+
+# =============================================================================
+# 1) Domain Modules Registry (정식 모듈 등록부: 8개 + 확장)
+# =============================================================================
+domain_modules:
+  - id: intake
+    name: "초진기록지"
+    kind: record
+    owns: ["questionnaire", "triage hints", "preassessment summary"]
+    entities: ["Patient", "Visit", "IntakeForm"]
+    events: ["INTAKE_SUBMITTED", "VISIT_CREATED"]
+    ui_surfaces: ["hospital-web", "patient-app"]
+
+  - id: clinic
+    name: "진료실"
+    kind: workflow
+    owns: ["diagnosis", "treatment plan", "patient explanation content links"]
+    entities: ["Visit", "Diagnosis", "Plan", "Order"]
+    events: ["DIAGNOSIS_CONFIRMED", "PLAN_PUBLISHED", "ORDER_CREATED"]
+    ui_surfaces: ["hospital-web"]
+
+  - id: rehab
+    name: "운동처방실"
+    kind: program
+    owns: ["exercise prescription", "quest", "adherence/retention metrics"]
+    entities: ["Program", "Quest", "Session", "Protocol"]
+    events: ["PROGRAM_ASSIGNED", "QUEST_ACCEPTED", "SESSION_COMPLETED"]
+    ui_surfaces: ["hospital-web", "patient-app"]
+
+  - id: procedure
+    name: "시술실/처치실"
+    kind: workflow
+    owns: ["procedure checklist", "positioning", "aftercare notes", "inventory checks"]
+    entities: ["Procedure", "Visit", "ChecklistItem", "InventoryItem"]
+    events: ["PROCEDURE_SCHEDULED", "PROCEDURE_COMPLETED", "AFTERCARE_DELIVERED"]
+    ui_surfaces: ["hospital-web"]
+
+  - id: admin
+    name: "원무과"
+    kind: workflow
+    owns: ["finance metrics", "revenue reports", "tax/alerts routines"]
+    entities: ["Invoice", "Payment", "LedgerEntry"]
+    events: ["INVOICE_ISSUED", "PAYMENT_CAPTURED", "REFUND_ISSUED"]
+    ui_surfaces: ["hospital-web"]
+
+  - id: reception
+    name: "접수실"
+    kind: workflow
+    owns: ["queue", "reservation", "ETA guidance", "handoff protocols"]
+    entities: ["QueueItem", "Reservation", "Visit"]
+    events: ["RESERVATION_CREATED", "CHECKIN_DONE", "QUEUE_UPDATED"]
+    ui_surfaces: ["hospital-web", "patient-app"]
+
+  - id: patient
+    name: "환자용"
+    kind: program
+    owns: ["patient portal", "education", "booking/change", "inquiries"]
+    entities: ["Patient", "MessageThread", "EducationDoc"]
+    events: ["INQUIRY_CREATED", "DOC_DELIVERED", "BOOKING_CHANGED"]
+    ui_surfaces: ["patient-app"]
+
+  - id: infusion
+    name: "수액/상품"
+    kind: commerce
+    owns: ["bundle/pricing policy", "discount rules", "margin optimization constraints"]
+    entities: ["IVPlan", "AddOn", "Offer", "PriceRule"]
+    events: ["OFFER_SHOWN", "OFFER_ACCEPTED", "IV_ORDER_CREATED"]
+    ui_surfaces: ["hospital-web", "patient-app"]
+
+  # ---- Extension Modules (정식 등록: BodyQuest / IVOptimizer) ----
+  - id: bodyquest
+    name: "BodyQuest (피지컬 퀘스트)"
+    kind: program
+    owns: ["physical quest assessment UI", "quest presentation", "daily adherence UI"]
+    entities: ["Quest", "Program", "Session", "Protocol"]
+    events: ["QUEST_GENERATED", "QUEST_ACCEPTED", "SESSION_COMPLETED"]
+    ui_surfaces: ["patient-app", "hospital-web"]
+
+  - id: iv_optimizer
+    name: "IV Therapy Optimizer (수액 전환/수익 최적화)"
+    kind: commerce
+    owns: ["offer laddering logic", "bundle optimization constraints", "conversion analytics"]
+    entities: ["Offer", "IVPlan", "AddOn", "PriceRule", "ConversionSignal"]
+    events: ["OFFER_RECOMMENDED", "OFFER_SHOWN", "OFFER_ACCEPTED"]
+    ui_surfaces: ["hospital-web"]
+
+# =============================================================================
+# 2) Repo Tree
+# =============================================================================
+tree:
+  root:
+    - apps
+    - packages
+    - tools
+    - docs
+    - tests
+    - scripts
+    - .github
+
+apps:
+  hospital-web:
+    type: app
+    stack: [typescript, react, vite]
+    entry_hints:
+      - "src/pages/clinic/clinic-v8.tsx"
+      - "src/main.tsx"
+    owns:
+      - "UI pages/components"
+      - "routing"
+      - "view state only"
+    must_not_own:
+      - "domain rules (protocol/pricing/state machines)"
+      - "domain schemas (entities/events/state)"
+
+  patient-app:
+    type: app
+    stack: [typescript, react, vite]
+    status: planned
+    owns:
+      - "patient UI"
+      - "BodyQuest UI surfaces"
+      - "booking/inquiry UI"
+    must_not_own:
+      - "domain rules"
+      - "domain schemas"
+
+  api-server:
+    type: app
+    stack: [python, fastapi, sqlite]
+    entry_hints:
+      - "app.py"
+      - "backend/spine_api.py"
+    owns:
+      - "HTTP endpoints"
+      - "DB persistence"
+      - "Outbox events"
+      - "authz + audit log endpoints"
+    must_not_own:
+      - "frontend UI"
+      - "hardcoded duplicate schemas (must conform to domain-spec)"
+
+packages:
+  core-types:
+    type: package
+    stack: [typescript]
+    owns:
+      - "shared ids/enums"
+      - "minimal domain types (UI-safe)"
+    constraints:
+      pure: true
+
+  domain-spec:
+    type: package
+    stack: [yaml, json]
+    owns:
+      - "entities schemas (single source)"
+      - "events catalog (single source)"
+      - "state machines spec (single source)"
+      - "protocol/pricing policy spec (single source)"
+      - "module registry mirror (optional)"
+    constraints:
+      pure: true
+    notes:
+      - "All apps/packages must conform. No duplicate schema sources elsewhere."
+
+  business-logic:
+    type: package
+    stack: [typescript]
+    owns:
+      - "pure domain rules derived from domain-spec"
+      - "quest generation rules (BodyQuest core)"
+      - "client-side pricing helpers (derived from spec)"
+      - "state machine helpers (derived from spec)"
+    depends_on:
+      - "packages/core-types"
+      - "packages/domain-spec"
+    constraints:
+      pure: true
+
+  spine-sdk:
+    type: package
+    stack: [typescript]
+    owns:
+      - "typed HTTP client for Spine API"
+      - "DTO mapping + minimal validation (schema refs only)"
+    depends_on:
+      - "packages/core-types"
+      - "packages/domain-spec"
+    must_not_own:
+      - "business decisions (protocol/pricing)"
+
+  ui-kit:
+    type: package
+    stack: [typescript, react]
+    owns:
+      - "shared UI components"
+      - "design tokens"
+    depends_on:
+      - "packages/core-types"
+    must_not_own:
+      - "business rules"
+      - "network clients"
+
+tools:
+  os-factory:
+    type: tool
+    stack: [html, javascript]
+    owns:
+      - "decision-engine (Gate/Regression/Anchor)"
+      - "SSOT validation (this YAML)"
+      - "repo boundary checks"
+      - "gate runner + reports"
+    entry_hints:
+      - "decision-engine/index.html"
+
+docs:
+  ssot:
+    type: docs
+    owns:
+      - "monorepo.yaml"
+      - "contracts/specs"
+
+tests:
+  contract:
+    type: test
+    stack: [python]
+    owns:
+      - "API contract tests"
+    entry_hints:
+      - "tests/contract/*.py"
+
+  smoke:
+    type: test
+    stack: [bash, powershell]
+    owns:
+      - "smoke scripts"
+    entry_hints:
+      - "scripts/smoke/smoke.sh"
+      - "scripts/smoke/smoke.ps1"
+
+scripts:
+  verify:
+    type: scripts
+    owns:
+      - "verification scripts (boundary scan, spec checks, event checks)"
+
+# =============================================================================
+# 3) Dependency Policy (allowed graph / hard boundaries)
+# =============================================================================
+dependency_policy:
+  allowed:
+    - from: "apps/hospital-web"
+      to: ["packages/core-types", "packages/domain-spec", "packages/business-logic", "packages/spine-sdk", "packages/ui-kit"]
+    - from: "apps/patient-app"
+      to: ["packages/core-types", "packages/domain-spec", "packages/business-logic", "packages/spine-sdk", "packages/ui-kit"]
+    - from: "apps/api-server"
+      to: ["packages/domain-spec", "docs/ssot", "scripts/verify"]
+    - from: "packages/business-logic"
+      to: ["packages/core-types", "packages/domain-spec"]
+    - from: "packages/spine-sdk"
+      to: ["packages/core-types", "packages/domain-spec"]
+    - from: "packages/ui-kit"
+      to: ["packages/core-types"]
+
+  forbidden:
+    # A) Apps must not contain domain schemas/rules
+    - rule_id: FORBID_APP_DOMAIN_RULES
+      severity: error
+      applies_to: "apps/*"
+      forbid_paths_glob:
+        - "**/business_logic/**"
+        - "**/domain_rules/**"
+        - "**/pricing_rules/**"
+        - "**/state_machine/**"
+      message: >
+        Apps must not own domain rules. Put them into packages/business-logic and define spec in packages/domain-spec.
+
+    # B) business-logic must remain pure
+    - rule_id: FORBID_BUSINESS_LOGIC_IO
+      severity: error
+      applies_to: "packages/business-logic"
+      forbid_imports_regex:
+        - "^axios$"
+        - "^node-fetch$"
+        - "^undici$"
+        - "^react"
+        - "^next"
+      forbid_globals:
+        - "window"
+        - "document"
+        - "localStorage"
+      message: >
+        business-logic must be pure (no network/React/browser globals).
+
+    # C) Network boundary: frontend uses spine-sdk only
+    - rule_id: FORBID_DIRECT_NET_OUTSIDE_SDK
+      severity: error
+      applies_to:
+        - "apps/hospital-web"
+        - "apps/patient-app"
+        - "packages/ui-kit"
+        - "packages/business-logic"
+      forbid_imports_regex:
+        - "^axios$"
+      forbid_code_regex:
+        - "\\bfetch\\("
+      except_paths_glob:
+        - "packages/spine-sdk/**"
+      message: >
+        Network calls must live in spine-sdk only.
+
+    # D) UI-kit must not become business logic
+    - rule_id: FORBID_UIKIT_BUSINESS_RULES
+      severity: warn
+      applies_to: "packages/ui-kit"
+      forbid_paths_glob:
+        - "**/protocol/**"
+        - "**/pricing/**"
+        - "**/state_machine/**"
+      message: >
+        ui-kit should be UI-only. Move business rules to packages/business-logic.
+
+    # E) SCHEMA SINGLE SOURCE: prevent duplicates
+    - rule_id: FORBID_DUPLICATE_SCHEMA_SOURCES
+      severity: error
+      applies_to: ["apps/*", "packages/*"]
+      forbid_paths_glob:
+        - "**/schemas/**"
+        - "**/*schema*.json"
+        - "**/*schema*.yaml"
+        - "**/*schema*.yml"
+        - "**/events/**"
+        - "**/state_machines/**"
+      except_paths_glob:
+        - "packages/domain-spec/**"
+      message: >
+        Schema/event/state-machine sources must live ONLY in packages/domain-spec.
+
+# =============================================================================
+# 4) Gate Rules (SSOT + Boundaries + Schema Dup + Event Coverage)
+# =============================================================================
+gates:
+  allPass_policy:
+    allow_warn_only_if:
+      - name_regex: "Golden Snapshot"
+        warn_true: true
+
+  required_checks:
+    - id: G0_SSOT_PARSE
+      type: ssot
+      description: "monorepo.yaml must parse and validate."
+      run_hint:
+        - "os-factory decision-engine SSOT load must PASS"
+
+    - id: G1_BOUNDARY_SCAN
+      type: static
+      description: "Forbidden import/dependency rules: zero ERROR."
+      run_hint:
+        - "scripts/verify/import_boundaries.*"
+
+    - id: G1B_SCHEMA_SINGLE_SOURCE
+      type: static
+      description: "No duplicate schema/event/state-machine sources outside packages/domain-spec."
+      run_hint:
+        - "scripts/verify/schema_single_source.*"
+
+    - id: G1C_EVENT_COVERAGE
+      type: static
+      description: >
+        All events referenced by domain_modules must exist in packages/domain-spec events catalog,
+        and api-server outbox must implement those events (mapping file check).
+      run_hint:
+        - "scripts/verify/event_coverage.*"
+
+    - id: G2_API_CONTRACT
+      type: test
+      description: "API contract tests must pass."
+      run_hint:
+        - "pytest tests/contract"
+
+    - id: G3_API_SMOKE
+      type: test
+      description: "API smoke tests must pass."
+      run_hint:
+        - "scripts/smoke/smoke.sh or smoke.ps1"
+
+    - id: G4_OS_FACTORY_TESTS
+      type: test
+      description: "decision-engine T1~T3 must pass (Golden warn only for Golden Snapshot)."
+      run_hint:
+        - "tools/os-factory/decision-engine/index.html -> RUN TESTS"
+
+# =============================================================================
+# 5) Change Impact (무슨 변경이면 어떤 게이트를 반드시 돌릴지)
+# =============================================================================
+change_impact:
+  when_changed:
+    "packages/domain-spec/**":
+      must_run: [G0_SSOT_PARSE, G1_BOUNDARY_SCAN, G1B_SCHEMA_SINGLE_SOURCE, G1C_EVENT_COVERAGE, G2_API_CONTRACT, G4_OS_FACTORY_TESTS]
+    "packages/core-types/**":
+      must_run: [G0_SSOT_PARSE, G1_BOUNDARY_SCAN, G2_API_CONTRACT, G4_OS_FACTORY_TESTS]
+    "packages/business-logic/**":
+      must_run: [G0_SSOT_PARSE, G1_BOUNDARY_SCAN, G4_OS_FACTORY_TESTS]
+    "packages/spine-sdk/**":
+      must_run: [G0_SSOT_PARSE, G1_BOUNDARY_SCAN, G4_OS_FACTORY_TESTS]
+    "apps/api-server/**":
+      must_run: [G1C_EVENT_COVERAGE, G2_API_CONTRACT, G3_API_SMOKE]
+    "apps/hospital-web/**":
+      must_run: [G1_BOUNDARY_SCAN, G4_OS_FACTORY_TESTS]
+    "apps/patient-app/**":
+      must_run: [G1_BOUNDARY_SCAN, G4_OS_FACTORY_TESTS]
+    "tools/os-factory/**":
+      must_run: [G0_SSOT_PARSE, G4_OS_FACTORY_TESTS]
+    "scripts/verify/**":
+      must_run: [G0_SSOT_PARSE, G4_OS_FACTORY_TESTS]
+
+# =============================================================================
+# 6) Migration Map (현재 자산 -> 목표 위치)
+# =============================================================================
+migration_map:
+  current_assets:
+    spine_api:
+      source_paths: ["app.py", "backend/spine_api.py"]
+      target: "apps/api-server/"
+    clinic_v8:
+      source_paths: ["clinic-v8.tsx"]
+      target: "apps/hospital-web/src/pages/clinic/clinic-v8.tsx"
+    decision_engine:
+      source_paths: ["decision-engine/index.html"]
+      target: "tools/os-factory/decision-engine/index.html"
+
+  new_assets:
+    bodyquest_ui:
+      target:
+        - "apps/patient-app/src/pages/bodyquest/"
+        - "apps/hospital-web/src/pages/rehab/bodyquest/"
+      logic_target:
+        - "packages/business-logic/src/bodyquest/"
+      spec_target:
+        - "packages/domain-spec/bodyquest/"
+    iv_optimizer:
+      target:
+        - "apps/api-server/src/infusion/iv_optimizer/"
+      spec_target:
+        - "packages/domain-spec/infusion/"
