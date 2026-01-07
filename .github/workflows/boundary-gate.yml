@@ -1,0 +1,46 @@
+name: boundary-gate
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  boundary_gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools (ripgrep)
+        run: |
+          set -euo pipefail
+          if command -v rg >/dev/null; then
+            echo "rg already present: $(rg --version | head -n 1)"
+          else
+            sudo apt-get update
+            sudo apt-get install -y ripgrep
+            rg --version
+          fi
+
+      - name: Ensure scripts are executable
+        run: |
+          chmod +x scripts/verify/*.sh || true
+
+      - name: Fail if CRLF in verify scripts
+        run: |
+          set -euo pipefail
+          if rg -nU "\r$" scripts/verify/*.sh; then
+            echo "CRLF detected in scripts. Convert to LF."
+            exit 1
+          fi
+
+      - name: GUARD (quote policy)
+        run: bash ./scripts/verify/wsl_quote_guard.sh
+
+      - name: HARD gate (import boundaries)
+        run: bash ./scripts/verify/import_boundaries.sh
+
+      - name: WARN gate (import boundaries warn-only)
+        run: bash ./scripts/verify/import_boundaries_warn.sh
